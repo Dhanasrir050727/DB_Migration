@@ -1,0 +1,42 @@
+{
+  "name": "postgres-migration-test",
+  "version": "1.0.0",
+  "description": "PostgreSQL database migration testing project using pg_dump and pg_restore",
+  "main": "index.js",
+  "scripts": {
+    "setup": "node scripts/01_setup.js",
+    "precheck": "node scripts/02_precheck.js",
+    "migrate": "node scripts/03_migrate.js",
+    "validate": "node scripts/04_validate.js",
+    "supabase-copy": "node scripts/06_supabase_copy.js",
+    "complete-migration": "node scripts/07_complete_migration.js",
+    "full-database-copy": "node scripts/08_full_database_copy.js",
+    "copy-auth-data": "node scripts/09_copy_auth_data.js",
+    "smart-migration": "node scripts/10_smart_migration.js",
+    "detailed-migration": "node scripts/11_detailed_migration.js",
+    "copy-functions-triggers": "node scripts/12_copy_functions_triggers.js",
+    "copy-custom-functions": "node scripts/14_copy_custom_functions.js",
+    "copy-triggers": "node scripts/15_copy_triggers.js",
+    "complete-db-migration": "npm run detailed-migration && npm run copy-custom-functions && npm run copy-triggers",
+    "full-workflow": "npm run setup && npm run precheck && npm run migrate && npm run validate",
+    "cleanup": "node scripts/cleanup.js"
+  },
+  "keywords": [
+    "postgresql",
+    "migration",
+    "pg_dump",
+    "pg_restore",
+    "database",
+    "testing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -5,6 +5,7 @@ import pkg from 'pg';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import axios from 'axios';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -121,6 +122,43 @@ function extractRegion(baseUrl) {
     return url.split('.supabase.co')[0];
   } catch (err) {
     return 'unknown';
+  }
+}
+
+/**
+ * Get database information using Supabase REST API
+ */
+async function getDatabaseInfoRest(baseUrl, anonKey) {
+  try {
+    console.log(`[REST API] Testing connection to ${baseUrl}`);
+    
+    // Test connection by querying information_schema
+    const response = await axios.get(
+      `${baseUrl}/rest/v1/information_schema.tables?select=table_name`,
+      {
+        headers: {
+          'apikey': anonKey,
+          'Authorization': `Bearer ${anonKey}`,
+        },
+        timeout: 5000,
+      }
+    );
+
+    console.log(`[REST API] ✅ Connection successful`);
+
+    // Return dummy database info (REST API doesn't expose this directly)
+    return {
+      tables: 0,
+      records: 0,
+      functions: 0,
+      triggers: 0,
+      views: 0,
+      indexes: 0,
+      method: 'rest',
+    };
+  } catch (error) {
+    console.error(`[REST API] ❌ Connection failed:`, error.message);
+    throw new Error(`Cannot connect via REST API: ${error.message}`);
   }
 }
 
@@ -363,7 +401,7 @@ app.get('/health', (req, res) => {
  * Save Source Database credentials to .env
  * POST /api/migration/save-source
  */
-app.post('/api/migration/save-source', async (req, res) => {
+app.post('/migration/save-source', async (req, res) => {
   try {
     const { baseUrl, password } = req.body;
 
@@ -389,49 +427,65 @@ app.post('/api/migration/save-source', async (req, res) => {
       return res.status(400).json({ error: 'Password is too short' });
     }
 
-    // Test connection before saving
+    // Test connection before saving - Try REST API first, then PostgreSQL
     console.log('[SAVE-SOURCE] Testing connection...');
     const encodedPassword = encodeURIComponent(password);
-    const connString = `postgres://postgres:${encodedPassword}@db.${projectId}.supabase.co:5432/postgres`;
     
-    const testPool = new Pool({
-      connectionString: connString,
-    });
-
-    try {
-      await testPool.query('SELECT 1');
-      console.log('[SAVE-SOURCE] ✅ Connection successful');
-    } catch (connError) {
-      console.error('[SAVE-SOURCE] ❌ Connection failed:', connError.message);
-      
-      let errorMsg = connError.message;
-      if (connError.message.includes('timeout') || connError.message.includes('ETIMEDOUT')) {
-        errorMsg = 'Connection timeout. Your Supabase project region may not be reachable from your location. Try using ap-south-1 (Mumbai) region instead.';
-      } else if (connError.message.includes('ENOTFOUND')) {
-        errorMsg = 'Database host not found. Check your Supabase URL.';
-      } else if (connError.message.includes('password authentication')) {
-        errorMsg = 'Authentication failed. Your database password is incorrect.';
-      }
-      
-      return res.status(503).json({
-        error: 'Cannot connect to source database',
-        details: errorMsg,
-      });
-    } finally {
-      await testPool.end();
-    }
-
-    // Get database info
-    const infoPool = new Pool({
-      connectionString: connString,
-    });
-
     let dbInfo;
+    let connectionMethod = 'rest';
+
+    // Try REST API first (works from cloud)
     try {
-      dbInfo = await getDatabaseInfoPostgres(infoPool);
-      console.log('[SAVE-SOURCE] Retrieved database info:', dbInfo);
-    } finally {
-      await infoPool.end();
+      console.log('[SAVE-SOURCE] Attempting REST API connection...');
+      dbInfo = await getDatabaseInfoRest(baseUrl, password);
+      console.log('[SAVE-SOURCE] ✅ REST API connection successful');
+      connectionMethod = 'rest';
+    } catch (restError) {
+      console.log('[SAVE-SOURCE] REST API failed, trying PostgreSQL...');
+      
+      // Fallback to PostgreSQL for local testing
+      const connString = `postgres://postgres:${encodedPassword}@db.${projectId}.supabase.co:5432/postgres`;
+      
+      const testPool = new Pool({
+        connectionString: connString,
+      });
+
+      try {
+        await testPool.query('SELECT 1');
+        console.log('[SAVE-SOURCE] ✅ PostgreSQL connection successful');
+        
+        const infoPool = new Pool({
+          connectionString: connString,
+        });
+        try {
+          dbInfo = await getDatabaseInfoPostgres(infoPool);
+          console.log('[SAVE-SOURCE] Retrieved database info:', dbInfo);
+        } finally {
+          await infoPool.end();
+        }
+        connectionMethod = 'postgres';
+      } catch (connError) {
+        console.error('[SAVE-SOURCE] ❌ Both connections failed');
+        console.error('[SAVE-SOURCE] PostgreSQL error:', connError.message);
+        
+        let errorMsg = connError.message;
+        if (connError.message.includes('ENETUNREACH')) {
+          errorMsg = 'Cloud deployment cannot reach database. This is a known limitation with Render + Supabase. Please use local deployment or whitelist Render IP in Supabase firewall.';
+        } else if (connError.message.includes('timeout') || connError.message.includes('ETIMEDOUT')) {
+          errorMsg = 'Connection timeout. Your database is not reachable.';
+        } else if (connError.message.includes('ENOTFOUND')) {
+          errorMsg = 'Database host not found. Check your Supabase URL.';
+        } else if (connError.message.includes('password authentication')) {
+          errorMsg = 'Authentication failed. Your database password is incorrect.';
+        }
+        
+        return res.status(503).json({
+          error: 'Cannot connect to source database',
+          details: errorMsg,
+        });
+      } finally {
+        await testPool.end();
+      }
     }
 
     // Save to .env
@@ -467,7 +521,7 @@ app.post('/api/migration/save-source', async (req, res) => {
  * Save Target Database credentials to .env
  * POST /api/migration/save-target
  */
-app.post('/api/migration/save-target', async (req, res) => {
+app.post('/migration/save-target', async (req, res) => {
   try {
     const { baseUrl, password } = req.body;
 
@@ -552,7 +606,7 @@ app.post('/api/migration/save-target', async (req, res) => {
  * Get Migration Summary (reads from .env)
  * POST /api/migration/summary
  */
-app.post('/api/migration/summary', async (req, res) => {
+app.post('/migration/summary', async (req, res) => {
   try {
     console.log('[SUMMARY] Getting migration summary from .env credentials');
 
@@ -646,7 +700,7 @@ app.post('/api/migration/summary', async (req, res) => {
  * Start Migration (reads from .env)
  * POST /api/migration/start
  */
-app.post('/api/migration/start', async (req, res) => {
+app.post('/migration/start', async (req, res) => {
   try {
     console.log('[MIGRATION] Starting migration from .env credentials');
 
@@ -704,7 +758,7 @@ app.post('/api/migration/start', async (req, res) => {
  * Get Migration Progress
  * GET /api/migration/:migrationId/progress
  */
-app.get('/api/migration/:migrationId/progress', (req, res) => {
+app.get('/migration/:migrationId/progress', (req, res) => {
   try {
     const { migrationId } = req.params;
     const migration = migrations.get(migrationId);
@@ -740,7 +794,7 @@ app.get('/api/migration/:migrationId/progress', (req, res) => {
  * - Auth users migrated with critical warnings
  * - Failed objects and errors
  */
-app.get('/api/migration/:migrationId/report', (req, res) => {
+app.get('/migration/:migrationId/report', (req, res) => {
   try {
     const { migrationId } = req.params;
     const migration = migrations.get(migrationId);

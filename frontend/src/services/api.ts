@@ -6,7 +6,7 @@ import axios from 'axios';
  * Backend only called for migration execution
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -49,7 +49,7 @@ export async function saveSourceCredentials(credentials: SourceDatabaseCredentia
     }
 
     // Call backend to test connection and save to .env
-    const response = await apiClient.post('/migration/save-source', {
+    const response = await apiClient.post('/api/migration/save-source', {
       baseUrl: credentials.baseUrl,
       password: credentials.anonKey || '',
     });
@@ -68,7 +68,7 @@ export async function saveTargetCredentials(credentials: TargetDatabaseCredentia
     }
 
     // Call backend to test connection and save to .env
-    const response = await apiClient.post('/migration/save-target', {
+    const response = await apiClient.post('/api/migration/save-target', {
       baseUrl: credentials.baseUrl,
       password: credentials.anonKey || '',
     });
@@ -113,7 +113,7 @@ export interface MigrationSummary {
 export async function getMigrationSummary(): Promise<MigrationSummary> {
   try {
     // No credentials needed - backend reads from .env
-    const response = await apiClient.post('/migration/summary');
+    const response = await apiClient.post('/api/migration/summary');
     return response.data;
   } catch (error: any) {
     throw new Error(error.response?.data?.error || 'Failed to get migration summary');
@@ -129,7 +129,7 @@ export interface MigrationOptions {
 
 export async function startMigration(): Promise<string> {
   try {
-    const response = await apiClient.post('/migration/start');
+    const response = await apiClient.post('/api/migration/start');
     return response.data.migrationId;
   } catch (error: any) {
     console.error('Failed to start migration:', error);
@@ -168,7 +168,7 @@ export interface MigrationProgress {
 
 export async function getMigrationProgress(migrationId: string): Promise<MigrationProgress> {
   try {
-    const response = await apiClient.get(`/migration/${migrationId}/progress`);
+    const response = await apiClient.get(`/api/migration/${migrationId}/progress`);
     return response.data;
   } catch (error: any) {
     throw new Error(error.response?.data?.error || 'Failed to get progress');
@@ -207,7 +207,7 @@ export interface MigrationReport {
 
 export async function getMigrationReport(migrationId: string): Promise<MigrationReport> {
   try {
-    const response = await apiClient.get(`/migration/${migrationId}/report`);
+    const response = await apiClient.get(`/api/migration/${migrationId}/report`);
     return response.data;
   } catch (error: any) {
     throw new Error(error.response?.data?.error || 'Failed to get report');
